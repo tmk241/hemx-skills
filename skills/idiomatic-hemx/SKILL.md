@@ -41,24 +41,23 @@ If authentication, storage, transport, replay, conflict, deployment, or service
 contracts are missing, identify the missing product decision. Do not invent a
 provider or abstraction that makes an unknown external effect look complete.
 
-## Trace one path end to end
+## Preserve request and effect ownership
 
-Start with the concrete mutation, navigation, push update, offline action, or
-recovery path that must work:
+For each interaction, keep responsibility in this order:
 
 ```text
 browser or HTTP input
-  -> authentication, CSRF, and typed validation
+  -> application security and typed validation
   -> application command or query
-  -> authoritative state transition
+  -> authoritative application state
   -> generated page or target
-  -> typed effect response
+  -> typed Hemx effect response
   -> root-scoped runtime application
-  -> visible success or explicit recovery
 ```
 
-Architecture changes are premature until this path and its failure behavior are
-clear.
+The application owns security, state, and recovery. Hemplate owns rendering;
+Hemx owns the typed UI effect contract and its browser application. Architecture
+must not blur those boundaries.
 
 ## Use the canonical authoring level
 
@@ -109,10 +108,13 @@ Use Rust types to preserve distinctions that change behavior:
 - dedicated view models at the rendering boundary;
 - generated form, target, handle, class, and event types instead of copied names.
 
-Do not newtype every string or create a type hierarchy for appearance alone. A
-closed visual state should usually be an enum rendered through a stable semantic
-attribute or class contract, not an arbitrary string used to synthesize class
-names. Keep static class tokens discoverable by generation and tooling.
+Do not newtype every string or create a type hierarchy for appearance alone. At
+a Hemplate boundary, keep related meaning together: a review status should be an
+enum or typed view value with one mapping to label, semantic attribute, and
+presentation—not several independent `String` fields that can disagree. A closed
+visual state should usually render through a stable semantic attribute or class
+contract, not an arbitrary string used to synthesize class names. Keep static
+class tokens discoverable by generation and tooling.
 
 Represent expected application failures with typed variants when they change
 recovery, placement, or user feedback. Preserve source chains at I/O boundaries
@@ -160,19 +162,34 @@ boundary problem before it is a microservice problem.
 
 Do not add:
 
-- selector strings or raw wire operations when generated helpers exist;
+- copied runtime resource IDs, raw wire operations, or framework-metadata
+  selectors when generated helpers exist;
 - a second client application model for server-owned UI;
 - framework-owned database, auth, routing, or deployment policy;
 - stored HTML/effect output as authoritative state;
 - offline, broker, queue, or service abstractions without chosen semantics;
 - speculative compatibility layers or extension seams.
 
-## Proof
+## Choose tests by behavior owner
 
-Verify the smallest real path at its owning boundary. Let `cargo check` and the
-Hemplate/Hemx build step reject broken templates and generated contracts; use
-deterministic domain tests, render/effect tests, Axum integration tests, and
-browser/runtime tests only where the browser owns behavior. A static render does
-not prove focus, history, or effect application. For scaling changes, require
-evidence for the pressure being addressed and test the new failure mode introduced
-by the boundary.
+Use the boundary that owns the behavior:
+
+- use ordinary Rust tests for domain invariants and state transitions;
+- use `hemx_test::run`, `run_async`, `run_result`, or `run_async_result` with an
+  `EffectInspector` for typed handler output and generated-target effects;
+- use `HtmlInspector` directly or through
+  `target_html_document`/`target_html_fragment` for static document and fragment
+  structure; prefer `assert_target` and `assert_handle` over copied runtime IDs;
+- enable `hemx-test`'s `axum` feature and use `hemx_test::axum` for a real Axum
+  router, middleware, status, headers, and response bodies;
+- use `TestProcess::builder` only when real process startup, readiness, sockets,
+  logs, or cleanup are the behavior under test;
+- use a focused real-browser test for JavaScript, focus, history, layout, SSE
+  application, or runtime reconciliation.
+
+Let `cargo check` and the Hemplate/Hemx build step reject broken templates and
+generated contracts. Keep CSS selectors that describe application-owned semantic
+HTML near the structural or browser test that owns them; do not build an
+app-selector catalogue in `hemx-test`. A static render does not prove focus,
+history, or effect application. When deployment topology changes, test the new
+failure mode introduced by that boundary.
