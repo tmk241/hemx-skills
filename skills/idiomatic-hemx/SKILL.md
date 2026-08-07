@@ -6,7 +6,8 @@ description: >-
   including whether microservices belong. Preserve Hemx's generated-resource
   and server-owned effect model and choose the smallest architecture that meets
   the demonstrated need. Do not use for generic Rust/Axum advice, visual design
-  alone, or development of the Hemx framework itself.
+  alone, Hemplate-only templating questions, or development of the Hemx
+  framework itself.
 ---
 
 # Idiomatic Hemx
@@ -31,8 +32,10 @@ speculative services.
 
 Read the application's instructions, dependency versions, nearest templates,
 public APIs, tests, and relevant Hemx documentation before naming APIs or
-changing architecture. In the Hemx repository, use `README.md`, Rustdoc, and
-tests.
+changing architecture. For the Hemx framework itself, use its public README,
+crate READMEs, Rustdoc, source, and tests. Do not depend on unpublished examples,
+private planning documents, or APIs absent from the application's selected
+version.
 
 If authentication, storage, transport, replay, conflict, deployment, or service
 contracts are missing, identify the missing product decision. Do not invent a
@@ -73,6 +76,18 @@ Never construct, concatenate, interpolate, or format HTML in Rust. Keep routing,
 authorization, sessions, persistence, feature flags, observability, and domain
 policy in the application or its integration crates rather than Hemx core.
 
+Keep reusable UI application-owned. The idiomatic unit is a semantic `.heml`
+template rendered from a typed Hemplate view; nested typed views provide
+composition, and Hemx-generated targets, handles, forms, classes, and events add
+interaction where the template declares it. Use the generated per-template API
+to render pages and partials or target updates.
+
+`#[hemx::component]` groups and checks handlers against a generated template
+component contract; it is not a second rendering abstraction and is unnecessary
+for a purely presentational reusable view. A component system may define shared
+visual and interaction conventions, but its production UI and reference surfaces
+must exercise the same Hemplate rendering and Hemx effect path.
+
 Use optional layers only when the user job proves the need:
 
 - opaque JavaScript islands for isolated high-frequency browser behavior;
@@ -84,6 +99,26 @@ Use optional layers only when the user job proves the need:
 The DOM, stored HTML fragments, and stored effect batches are not business
 truth. Keep authoritative state in application models and durable providers;
 derive UI output from that state.
+
+## Make the compiler carry semantic weight
+
+Use Rust types to preserve distinctions that change behavior:
+
+- newtypes for identifiers or values that must not be interchanged accidentally;
+- enums for closed states and variants;
+- dedicated view models at the rendering boundary;
+- generated form, target, handle, class, and event types instead of copied names.
+
+Do not newtype every string or create a type hierarchy for appearance alone. A
+closed visual state should usually be an enum rendered through a stable semantic
+attribute or class contract, not an arbitrary string used to synthesize class
+names. Keep static class tokens discoverable by generation and tooling.
+
+Represent expected application failures with typed variants when they change
+recovery, placement, or user feedback. Preserve source chains at I/O boundaries
+using the project's normal error convention, then map failures to explicit safe
+view models. Do not render diagnostic error text or let one generic error erase
+recoverable distinctions.
 
 ## Keep the core functional and the shell explicit
 
@@ -134,7 +169,10 @@ Do not add:
 
 ## Proof
 
-Verify the smallest real path at its owning boundary: deterministic domain tests,
-render/effect tests, Axum integration tests, and browser/runtime tests only where
-the browser owns behavior. For scaling changes, require evidence for the pressure
-being addressed and test the new failure mode introduced by the boundary.
+Verify the smallest real path at its owning boundary. Let `cargo check` and the
+Hemplate/Hemx build step reject broken templates and generated contracts; use
+deterministic domain tests, render/effect tests, Axum integration tests, and
+browser/runtime tests only where the browser owns behavior. A static render does
+not prove focus, history, or effect application. For scaling changes, require
+evidence for the pressure being addressed and test the new failure mode introduced
+by the boundary.
