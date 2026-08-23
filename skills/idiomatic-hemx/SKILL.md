@@ -56,8 +56,8 @@ Classify the requested behavior before writing code.
 | Group of checked handlers | `#[hemx::component]` against the generated component contract |
 | Server push | canonical effect batch over the supported SSE/WebSocket adapter |
 | Isolated high-frequency browser behavior | explicit JavaScript island |
-| Client-local portable behavior | explicit `hemx-wasm` opt-in |
-| Durable/offline synchronization | only after event, replay, deletion, ordering, and conflict semantics exist |
+| Server-side Wasm isolate | normal Hemx core plus the platform adapter owned by the application |
+| Durable/offline synchronization | keep outside the public core until event, replay, deletion, ordering, and conflict semantics exist |
 
 Start with one server process and ordinary Axum application state unless a
 measured availability, scaling, ownership, or isolation pressure requires more.
@@ -148,9 +148,9 @@ HTTP extraction, clocks, random IDs, queues, sockets, and host capabilities in a
 thin explicit shell.
 
 Do not introduce a trait merely to mock one function. Add an adapter when a real
-side-effect or ownership boundary exists. For client-local code, expose only the
-needed host capabilities; do not assume ambient filesystem, network, clock, or
-randomness.
+side-effect or ownership boundary exists. In a server-side Wasm isolate, expose
+only the platform capabilities the application needs; do not assume ambient
+filesystem, network, clock, randomness, storage, or process state.
 
 ## Prove behavior at its owner
 
