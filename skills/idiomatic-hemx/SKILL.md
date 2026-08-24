@@ -57,7 +57,7 @@ Classify the requested behavior before writing code.
 | Server push | canonical effect batch over the supported SSE/WebSocket adapter |
 | Isolated high-frequency browser behavior | explicit JavaScript island |
 | Server-side Wasm isolate | normal Hemx core plus the platform adapter owned by the application |
-| Durable/offline synchronization | keep outside the public core until event, replay, deletion, ordering, and conflict semantics exist |
+| Durable/offline synchronization | only after event, replay, deletion, ordering, and conflict semantics exist |
 
 Start with one server process and ordinary Axum application state unless a
 measured availability, scaling, ownership, or isolation pressure requires more.
