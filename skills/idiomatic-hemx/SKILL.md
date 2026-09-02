@@ -50,8 +50,8 @@ Classify the requested behavior before writing code.
 
 | User-visible behavior | Default path |
 | --- | --- |
-| Full page or navigation | real link or GET form -> application query -> Hemplate page |
-| Form or control interaction | generated form/control -> `#[hemx::handler]` -> command -> generated target effect |
+| Full page or navigation | real link or GET form -> application query -> Hemplate page response with the generated build fingerprint |
+| Form or control interaction | native form/control semantics -> generated form/handle -> `#[hemx::handler]` -> command -> generated target effect |
 | Reusable presentation | typed Hemplate view, composed from nested views |
 | Group of checked handlers | `#[hemx::component]` against the generated component contract |
 | Server push | canonical effect batch over the supported SSE/WebSocket adapter |
@@ -77,9 +77,15 @@ In application code:
   documented response type;
 - derive a dedicated view model from authoritative application state;
 - use `Slot`, keyed slots, and generated helpers instead of numeric resource IDs;
-- use real links and GET forms where navigation/history is the browser's job;
+- preserve the browser-native contract: links keep `href`; forms keep their real
+  `method` and `action`; controls keep names, labels, and relevant ARIA state;
+- add documented `data-hemx-*` source attributes for enhancement instead of
+  replacing those native semantics or hand-authoring lowered runtime markers;
 - use plain CSS and stable semantic attributes for appearance.
 
+A mutation form should still describe a real URL-encoded `POST`; Hemx adds the
+generated handle and event contract and injects its hidden dispatch field. Use
+multipart only when the selected release and the actual form fields require it.
 Never concatenate or format HTML in Rust. Hemplate interpolation is escaped by
 default; raw HTML is an explicit trust boundary, not a convenience. Keep
 routing, authorization, sessions, persistence, migrations, feature flags, and
@@ -88,6 +94,22 @@ domain policy in the application or their real integration crates.
 `#[hemx::component]` checks a handler group against a generated template
 contract. It is not a second renderer and is unnecessary for a purely
 presentational view.
+
+Keep a JavaScript island visibly local: the server may dispatch an explicit
+Hemx event into the current root, while the island owns only the browser-only
+behavior that consumes it (for example a native dialog, canvas, or
+high-frequency gesture). Re-query island elements after HTML morphs; do not let
+the island retain rendered nodes or mirror authoritative application state.
+
+For an Axum application, keep the reachable integration chain together: render
+the Hemplate page through the selected release's `PageResponse` API with the
+generated `BuildFingerprint`, serve the packaged `RuntimeJs`, extract an
+`InteractionRequest`, and dispatch it through the registry produced by
+`#[hemx::app]`. Generated form handlers use the selected release's documented
+typed form boundary. With the current release, import the adapter's `Form` and
+write `Form<T>`, or use either supported qualified path: `hemx::Form<T>` or
+`hemx_axum::Form<T>`. Do not independently parse the same body or manually
+register numeric handles.
 
 ## Preserve ownership through an interaction
 
@@ -133,9 +155,12 @@ For Hemx transport:
   inventing an effect media type;
 - use the canonical `EffectBatch` wire representation for SSE/WebSocket delivery;
 - reject malformed or incompatible payloads instead of guessing a fallback;
-- keep effects scoped to the current generated root;
+- keep effects scoped to the current generated root and let the page adapter
+  attach its build marker instead of writing one into the template;
 - use `InteractionRequest`/generated form dispatch for supported form and file
-  inputs rather than bypassing origin, media-type, and body-limit handling.
+  inputs rather than bypassing media-type and body-limit handling;
+- preserve the canonical `data-hemx-*` runtime vocabulary emitted by the build
+  and adapter layers; do not add short aliases or a second marker scheme.
 
 A custom transport may move canonical bytes. It must not become a second effect
 schema or a place for domain policy.
@@ -163,9 +188,9 @@ Choose the cheapest boundary that can expose the real failure.
 | Generated target update | generated target with `EffectInspector`; do not copy IDs |
 | Static page or fragment structure | `HtmlInspector`, `target_html_document`, or `target_html_fragment` |
 | Generated target/handle markers | `HtmlInspector::assert_target` / `assert_handle` |
-| Axum route, middleware, headers, status, or body | enable `hemx-test`'s `axum` feature and use `hemx_test::axum` against a real `Router` |
+| Axum route, middleware, headers, status, body, runtime asset, or native form fallback | enable `hemx-test`'s `axum` feature and use `hemx_test::axum` against a real `Router` |
 | Process startup, readiness, socket, logs, cleanup | `TestProcess::builder` |
-| JavaScript application, focus, history, layout, SSE/WebSocket reconciliation | focused real-browser test |
+| JavaScript application, enhanced form submission, atomic target application, generated history navigation, island event handoff, focus, layout, SSE/WebSocket reconciliation | focused real-browser test |
 | Portable target boundary | compile the actual consumer for its target and inspect the normal dependency graph |
 
 Let `cargo check` and the real build step reject invalid templates and generated
