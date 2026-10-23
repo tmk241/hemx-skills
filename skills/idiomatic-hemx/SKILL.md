@@ -107,6 +107,25 @@ multipart only when the selected release and the actual form fields require it.
 Do not assemble template HTML in handler strings; render a Hemplate view.
 Text helpers escape; only explicit trusted HTML introduces markup.
 
+For component composition in Hemplate 0.4, distinguish element content from
+attributes:
+
+- In element content, `{+ value +}` HTML-escapes `Display` text, but directly
+  calls `render_into` for a Hemplate component; its markup is not escaped.
+- `{+= value =+}` emits explicitly trusted `Display` HTML without escaping.
+  Hemplate components are rejected here at compile time by `RawGuard`.
+- Compose an ordinary child as `{+ Child::new(...) +}`, not
+  `{+= heml::render(&Child::new(...)) =+}`. Pre-rendering a child into trusted
+  HTML is not the normal composition path.
+
+With Hemx 0.5, render the outer view through its generated renderer, for example
+`heml::page::render(&page)` for `page.heml`. It renders the composed tree, then
+lowers the complete nested resource table once. `heml` names a generated Rust
+module, not another template operator. Hemplate-only rendering does not perform
+Hemx root integration; keep the generated renderer and response boundary below.
+Component rendering in element content does not authorize component markup or
+raw HTML in attributes; raw interpolation is rejected in attribute values.
+
 Hemplate 0.4 checks attribute contexts, not merely HTML escaping. Parse a whole
 untrusted navigation URL with `hemplate::Url::parse` and handle rejection before
 rendering; a typed URL occupies the entire attribute. A fixed safe prefix such
@@ -135,7 +154,7 @@ business state. Verify identity and cleanup across morphs, replacements, and
 navigation rather than assuming those paths are interchangeable.
 
 For an Axum application, keep the reachable integration chain together: lower
-the page through the generated page helper (for example `heml::page`), then use
+the page through the generated page helper (for example `heml::page::render`), then use
 `PageResponse` with the generated `BuildFingerprint`. Rendering Hemplate alone
 does not lower Hemx resources. Serve the packaged `RuntimeJs`, extract an
 `InteractionRequest`, and dispatch through the registry from `#[hemx::app]`.
