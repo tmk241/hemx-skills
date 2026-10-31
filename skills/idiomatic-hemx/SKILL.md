@@ -39,7 +39,8 @@ Before naming an API or changing architecture, inspect:
 Hemx crates may version independently. In particular, do not assume
 `hemx-test` has the same version as the main `hemx` facade. Do not rely on a
 private example, an unpublished API, or copied generated output. This guidance
-targets Hemx 0.5, Hemplate 0.4, and `hemplate-runtime` 0.3.
+targets Hemx 0.6 (`hemx-test` 0.7), Hemplate 0.5, `hemplate-runtime` 0.4 and
+`hemplate-fmt` 0.1.
 
 If auth, persistence, transport, replay, conflict, or deployment behavior is
 not chosen, state the missing decision. Do not hide it behind a speculative
@@ -53,8 +54,8 @@ Classify the requested behavior before writing code.
 
 | User-visible behavior | Default path |
 | --- | --- |
-| Full page or navigation | real link or GET form -> application query -> Hemplate page response with the generated build fingerprint |
-| Form or control interaction | native form/control semantics -> generated form/handle -> `#[hemx::handler]` -> command -> generated target effect |
+| Full page or navigation | real link or GET form -> application query -> `PageResponse::full(heml::render(&page))` |
+| Form or control interaction | native form/control semantics -> generated form/handle -> `#[hemx::handler]` -> command -> generated target effect, routed with `hemx_axum::action` |
 | Reusable presentation | typed Hemplate view, composed from nested views |
 | Group of checked handlers | `#[hemx::component]` against the generated component contract |
 | Server push | canonical effect batches over SSE; application-owned sockets only when needed |
@@ -69,9 +70,30 @@ A larger codebase needs module boundaries before it needs network boundaries.
 ## Author at the semantic level
 
 Use `.heml` templates to declare roots, slots, forms, handles, keyed targets,
-classes, collections, and events. Let `hemx-build` generate their Rust vocabulary.
-A normal build script uses the public `hemx-build` application builder; inspect the
-selected version rather than recreating generated files.
+classes, collections, and events. Let `hemx-build` generate their Rust vocabulary:
+`build.rs` calls `hemx_build::app().run()`, and the application includes the
+result only through `#[hemx::surface] pub mod heml {}`. Refer to generated items
+as `heml::<template>::<name>` and `heml::BUILD_FINGERPRINT`; they never enter the
+crate root. Do not recreate or copy generated files.
+
+Templates are lowered when they compile: the derive already writes the final
+runtime markers and every handled form's hidden `__h`/`__b` fields. There is no
+separate lowering call and no runtime rewriting of rendered HTML.
+
+Write templates so the build accepts them on the first try:
+
+- Keep the canonical layout: run `hemplate-fmt templates`; the build fails for a
+  template that is not formatted and names the files.
+- Write well-formed HTML. Misnested or broken markup fails with its template
+  position; it never renders partially.
+- `<div/>` is not an empty element in HTML (the browser keeps it open); write
+  `<div></div>`. Void elements (`<br/>`, `<input/>`) and SVG/MathML may self-close.
+- HTML comments are template comments and are not rendered.
+- `{+ ... +}` holds ordinary Rust (multi-line calls, trailing commas, struct
+  literals, closures). `?`, `return`, `.await`, `unsafe`, and `break`/`continue`
+  out of a template loop are rejected: prepare such values before rendering.
+- Resource names (`data-hemx-slot`, `-collection`, `-handle`, `-form`) are literal
+  attributes, never `+data-hemx-...` bindings.
 
 In application code:
 
@@ -83,10 +105,10 @@ In application code:
 - preserve the browser-native contract: links keep `href`; forms keep their real
   `method` and `action`; controls keep names, labels, and relevant ARIA state;
 - add documented `data-hemx-*` source attributes for enhancement instead of
-  replacing those native semantics or hand-authoring lowered runtime markers;
+  replacing those native semantics or hand-authoring runtime markers;
 - use plain CSS and stable semantic attributes for appearance.
 
-For collections in Hemx 0.5, use the generated target's `set(&rows)` to declare
+For collections, use the generated target's `set(&rows)` to declare
 complete content, or `transition(before, after, changed)` with both key orders
 and every new or changed row. Rows implement Hemplate and `hemx::KeyedPartial`.
 These produce `Rows`/`RowsDelta` declarations, not insertion/movement commands.
@@ -98,35 +120,39 @@ own collection membership. Do not copy the underlying order hashes or opcodes.
 Only controls and explicit `data-hemx-param-*` attributes become request fields;
 ordinary `data-*` stays DOM metadata. Drag keys use the reserved `__drag` field.
 HTML Boolean attributes use presence, not string truth: `disabled="false"` is
-still disabled. In Hemplate 0.4, use a Boolean binding such as
-`+disabled="self.disabled"` to omit false; verify rendered/browser state.
+still disabled. Use a Boolean binding such as `+disabled="self.disabled"` to
+omit false. A whole dynamic attribute may hold an `Option`: `None` omits the
+attribute, `Some(value)` renders the value with its usual context checks (an
+`Option<String>` in `href` is still rejected). Verify rendered/browser state.
 
-A mutation form should still describe a real URL-encoded `POST`; Hemx adds the
-generated handle and event contract and injects its hidden dispatch field. Use
+A mutation form should still describe a real URL-encoded `POST`; the compiled
+template already carries the generated handle and the hidden `__h`/`__b` fields.
+A handled form needs `<form ...></form>`, never `<form .../>`. Use
 multipart only when the selected release and the actual form fields require it.
 Do not assemble template HTML in handler strings; render a Hemplate view.
 Text helpers escape; only explicit trusted HTML introduces markup.
 
-For component composition in Hemplate 0.4, distinguish element content from
-attributes:
+For component composition, distinguish element content from attributes:
 
 - In element content, `{+ value +}` HTML-escapes `Display` text, but directly
   calls `render_into` for a Hemplate component; its markup is not escaped.
-- `{+= value =+}` emits explicitly trusted `Display` HTML without escaping.
-  Hemplate components are rejected here at compile time by `RawGuard`.
-- Compose an ordinary child as `{+ Child::new(...) +}`, not
-  `{+= heml::render(&Child::new(...)) =+}`. Pre-rendering a child into trusted
-  HTML is not the normal composition path.
+- `{+= value =+}` emits trusted markup without escaping and accepts only
+  `HtmlValue` types: Hemx `SafeHtml`, a rendered `Html`, Hemplate `TrustedHtml`,
+  or an application type such as a sanitizer's output that implements
+  `hemplate::HtmlValue`. A `String`/`&str` does not compile, and components are
+  rejected even if they implement `Display`.
+- Compose an ordinary child as `{+ Child::new(...) +}`. Do not pre-render
+  children into strings or raw output.
 
-With Hemx 0.5, render the outer view through its generated renderer, for example
-`heml::page::render(&page)` for `page.heml`. It renders the composed tree, then
-lowers the complete nested resource table once. `heml` names a generated Rust
-module, not another template operator. Hemplate-only rendering does not perform
-Hemx root integration; keep the generated renderer and response boundary below.
+Render any view with `heml::render(&view) -> Html`; no template name is needed,
+because every nested template already carries its final markers. `heml` names
+the generated Rust module, not a template operator. A fragment you store and
+compose before rendering is `SafeHtml` (`heml::render(&view).into()`,
+`SafeHtml::join(..)`); a finished page is the typed `Html`.
 Component rendering in element content does not authorize component markup or
 raw HTML in attributes; raw interpolation is rejected in attribute values.
 
-Hemplate 0.4 checks attribute contexts, not merely HTML escaping. Parse a whole
+Hemplate checks attribute contexts, not merely HTML escaping. Parse a whole
 untrusted navigation URL with `hemplate::Url::parse` and handle rejection before
 rendering; a typed URL occupies the entire attribute. A fixed safe prefix such
 as `/users/` also permits escaped text interpolation. A checked `Url` does not
@@ -153,29 +179,37 @@ state; do not cache server-owned nodes outside it across updates or mirror
 business state. Verify identity and cleanup across morphs, replacements, and
 navigation rather than assuming those paths are interchangeable.
 
-For an Axum application, keep the reachable integration chain together: lower
-the page through the generated page helper (for example `heml::page::render`), then use
-`PageResponse` with the generated `BuildFingerprint`. Rendering Hemplate alone
-does not lower Hemx resources. Serve the packaged `RuntimeJs`, extract an
-`InteractionRequest`, and dispatch through the registry from `#[hemx::app]`.
+For an Axum application, keep the reachable integration chain together: return
+`PageResponse::full(heml::render(&page))`; the typed `Html` carries its build and
+the response stamps the root and header itself. Serve the runtime with
+`.merge(hemx_axum::runtime_route())`. Route each action with
+`hemx_axum::action(registry, Native::new("/", feedback))`: it answers enhanced
+requests with effects and native submissions with a 303 to the declared
+same-origin path, or a 422 feedback page rendered from the rejected input. Do not
+inspect `Accept` or `Referer` yourself. The registry comes from `#[hemx::app]`
+or `interactions(heml::BUILD_FINGERPRINT)`.
 The typed dispatch wrapper is `hemx_axum::Form<T>` (or imported `Form<T>`),
 implementing `FromInteractionForm`, not Axum's `FromRequest`. `hemx::Form<T>` is
 a form resource token, not that wrapper. `InteractionRequest` and
 `InteractionForm` own HTTP extraction; do not parse the body twice or manually
 register numeric handles.
 
-Native action routes still belong to the application, including submitter
-URL/method overrides. Share validation and one mutation operation between native
-and enhanced requests: native GET returns HTML; successful native POST normally
-returns 303 to a GET, and invalid input returns accessible HTML feedback.
-Enhanced validation errors need a successful canonical effect response rendering
-that feedback, not an HTTP failure the runtime cannot apply. Never serve effect
-bytes as a native document. Preserve values and test focus/announcements on
-failure. Native constraint validation and `submit` cancellation remain valid;
-an enhanced POST failure must never trigger an automatic native POST retry,
-because the command may already have committed.
+One handler serves both representations through the adapter; keep validation
+and the single mutation operation inside it. Enhanced validation errors need a
+canonical effect response rendering that feedback, not an HTTP failure the
+runtime cannot apply. Preserve values and test focus/announcements on failure.
+Native constraint validation and `submit` cancellation remain valid.
 
-In 0.5, generated action forms include `__h` and the build field `__b`. Registry
+A failed enhanced POST is never replayed as a native POST, because the command
+may already have committed. Use `hemx_axum::action_with_ledger(registry, native,
+MemoryLedger::new(limits))` where a lost response must be safe to resend: the
+runtime then resends once with the same submission token, and the ledger returns
+the first response instead of running the handler again (425 while it still
+runs, reported as `HEMX_SUBMISSION_PENDING`). `MemoryLedger` serves one process;
+several processes need a `Ledger` on shared storage, and `age` must exceed the
+action's deadline (`data-hemx-timeout`, default ten seconds).
+
+Generated action forms include `__h` and the build field `__b`. Registry
 dispatch rejects missing/different builds with 409 before handlers run. Manual
 `InteractionForm` dispatch must first call
 `form.require_build(heml::BUILD_FINGERPRINT)?`. Extraction rejects cross-site
@@ -226,11 +260,11 @@ For Hemx transport:
   application version string;
 - return `EffectResponse` through `hemx-axum` or generated dispatch rather than
   inventing an effect media type;
-- in 0.5, use canonical `EffectBatch` ABI-3 bytes for SSE or application-owned
+- use canonical `EffectBatch` ABI-3 bytes for SSE or application-owned
   sockets; rebuild templates, server, and runtime together, as ABI 2 is rejected;
 - use fallible `batch.to_wire()?` and respect producer/browser byte and item
   limits; do not turn an encoding failure into invalid bytes or empty success;
-- `data-hemx-ws` is rejected in 0.5; a custom socket feeds canonical bytes to
+- `data-hemx-ws` is rejected; a custom socket feeds canonical bytes to
   `window.hemx.applyBatch` and owns connection lifecycle and recovery;
 - reject malformed or incompatible payloads instead of guessing a fallback;
 - keep effects scoped to the current generated root and let the page adapter
@@ -240,7 +274,7 @@ For Hemx transport:
 - preserve the canonical `data-hemx-*` runtime vocabulary emitted by the build
   and adapter layers; do not add short aliases or a second marker scheme.
 
-For replayable SSE in 0.5, use `hemx_axum::Live` with `Resume`. Publish under the
+For replayable SSE, use `hemx_axum::Live` with `Resume`. Publish under the
 lock guarding the described state; read `Live::cursor` with that same state for
 the page and snapshots. `Live::sse` resumes using `Last-Event-ID` or the page's
 `after` query cursor, replays its bounded in-memory window, and invokes the
@@ -280,11 +314,12 @@ Choose the cheapest boundary that can expose the real failure.
 | Domain rule or state transition | ordinary Rust unit/integration test |
 | Handler's typed effects | `hemx_test::run`, `run_async`, `run_result`, or `run_async_result` plus `EffectInspector` |
 | Generated target update | generated target with `EffectInspector`; do not copy IDs |
+| Template layout | `hemplate-fmt --check templates` (the build enforces it) |
 | Static page or fragment structure | `HtmlInspector`, `target_html_document`, or `target_html_fragment` |
 | Generated target/handle markers | `HtmlInspector::assert_target` / `assert_handle` |
 | Axum route, middleware, headers, status, body, runtime asset, or native form fallback | enable `hemx-test`'s `axum` feature and use `hemx_test::axum` against a real `Router` |
 | Process startup, readiness, socket, logs, cleanup | `TestProcess::builder` |
-| JavaScript application, enhanced form submission, batch ordering and failure boundaries, generated history navigation, island event handoff, focus, layout, SSE/WebSocket reconciliation | focused real-browser test |
+| JavaScript application, enhanced form submission, batch ordering and failure boundaries, generated history navigation, island event handoff, focus, layout, SSE/WebSocket reconciliation | focused real-browser test in Firefox, Chromium and WebKit (Safari has no `moveBefore` yet: a row holding focus is not moved there) |
 | Portable target boundary | compile the actual consumer for its target and inspect the normal dependency graph |
 
 Let `cargo check` and the real build step reject invalid templates and generated
