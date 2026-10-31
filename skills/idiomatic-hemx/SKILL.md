@@ -178,6 +178,8 @@ high-frequency gesture). An island may retain its own nodes and browser-only
 state; do not cache server-owned nodes outside it across updates or mirror
 business state. Verify identity and cleanup across morphs, replacements, and
 navigation rather than assuming those paths are interchangeable.
+The dispatched event's `detail` is a `Uint8Array` of the payload bytes; decode
+it with a fatal UTF-8 `TextDecoder` and validate it before touching the island.
 
 For an Axum application, keep the reachable integration chain together: return
 `PageResponse::full(heml::render(&page))`; the typed `Html` carries its build and
@@ -282,6 +284,9 @@ application's snapshot when continuity is unavailable (including restart or
 lag). `Live::new` retains 1,024 batches; `Live::with_replay` selects the window.
 Snapshots declare every shown collection with `set`; use a `Visit` if the state
 cannot fit the wire budget. This is not durable/offline synchronization.
+For work that finishes (one job's progress), stream with
+`hemx_axum::sse_until_done`: after the last batch the browser closes the
+connection instead of reconnecting; end with an error to keep reconnection.
 
 SSE coalescing is lossless: it preserves every operation in order, saving
 envelopes/framing, not HTML payload or DOM operations. Side effects or differing
